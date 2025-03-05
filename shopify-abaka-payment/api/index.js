@@ -23,92 +23,113 @@ app.get("/api/pay", (req, res) => {
     res.json({ message: "Pay API is running with full functionality!" });
 });
 
+async function getShopifyOrder(orderId) {
+    try {
+        console.log("[DEBUG] Raw order_id received:", orderId); // 🔍 Log input
+
+        // Ensure order ID is a number
+        const numericOrderId = parseInt(orderId, 10);
+        if (isNaN(numericOrderId)) {
+            throw new Error("Invalid order ID format. Must be a number.");
+        }
+
+        console.log("[DEBUG] Converted order_id:", numericOrderId); // 🔍 Log converted ID
+
+        const response = await axios.get(
+            `https://lockoutsupplements.myshopify.com/admin/api/2024-04/orders/${numericOrderId}.json`,
+            {
+                headers: {
+                    "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+
+        console.log("[DEBUG] Shopify Order Response:", response.data); // 🔥 Debugging
+        return response.data.order;
+    } catch (error) {
+        console.error("[ERROR] Shopify API request failed:", error.response?.data || error.message);
+        return null;
+    }
+}
+
+
+
+
+
 // ✅ Payment Processing (Generates Payment Link)
 app.get("/api/process-payment", async (req, res) => {
     try {
-        const merchantId = process.env.MERCHANT_ID;
-        const privateKey = process.env.PRIVATE_KEY;
-        const { order_id, amount, name, email } = req.query;
+        console.log("[DEBUG] Received Query Params:", req.query); // 🔥 Log incoming query params
 
+        const { order_id, amount } = req.query;
 
-        if (!order_id || !amount || !name || !email) {
-            return res.status(400).json({ error: "Missing required parameters" });
+        // Ensure order_id is valid
+        if (!order_id || isNaN(parseInt(order_id, 10))) {
+            console.error("[ERROR] Invalid or missing order_id:", order_id);
+            return res.status(400).json({ error: "Invalid or missing order_id." });
         }
 
-        const [firstName, lastName = ""] = name.split(" ");
-        if (isNaN(amount) || amount <= 0) {
-            return res.status(400).json({ error: "Invalid amount" });
+        console.log("[DEBUG] Fetching order from Shopify for order_id:", order_id);
+        const order = await getShopifyOrder(order_id);
+
+        if (!order) {
+            console.error("[ERROR] Order not found in Shopify for ID:", order_id);
+            return res.status(404).json({ error: "Order not found in Shopify." });
         }
 
-        // Prepare data payload
+        // Extract customer details with debugging logs
+        const firstName = order.customer?.first_name || "N/A";
+        const lastName = order.customer?.last_name || "N/A";
+        const email = order.customer?.email || "N/A";
+        const phone = order.customer?.phone || "123456789";
+        const address = order.shipping_address?.address1 || order.billing_address?.address1 || "N/A";
+        const city = order.shipping_address?.city || order.billing_address?.city || "N/A";
+        const state = order.shipping_address?.province || order.billing_address?.province || "N/A";
+        const zip = order.shipping_address?.zip || order.billing_address?.zip || "N/A";
+        const country = order.shipping_address?.country_code || order.billing_address?.country_code || "US";
+
+        console.log("[DEBUG] Customer Details Extracted:", { firstName, lastName, email, phone, address, city, state, zip, country });
+
+        // Abaka Payload
         const payload = {
-            merchant_id: merchantId,
-            key: privateKey,
+            merchant_id: process.env.MERCHANT_ID,
+            key: process.env.PRIVATE_KEY,
             action: "pay",
             amount,
             currency: "USD",
             first_name: firstName,
             last_name: lastName,
             email,
-            phone: "123456789", // Required
-            address: "Customer Address",
-            address1: "Suite 100",
-            city: "City",
-            state: "State",
-            zip: "12345",
-            country: "US",
+            phone,
+            address,
+            city,
+            state,
+            zip,
+            country,
             ext_order_id: order_id,
-            // 🔥 Add Fake Credit Card Details
-            number: "4242424242424242", // Visa test card
-            type: "2", // 1 = Amex, 2 = Visa, 3 = Mastercard, 4 = Discover
-            month: "12", // Expiry month
-            year: "2026", // Expiry year
-            cvv: "123", // CVV code
-            ip: "123.231.123.209",
-            birthday: "1978-03-15"
-
+            number: "4242424242424242",  // Fake test card
+            type: "2",                   // Visa
+            month: "12",
+            year: "2026",
+            cvv: "123"
         };
+
+        console.log("[DEBUG] Sending Payment Request to Abaka with Payload:", payload);
+
+        // Send payment request to Abaka
+        const abakaResponse = await axios.post("https://secure.abaka.cc/rest/v2", payload);
         
-        
-        
+        console.log("[DEBUG] Abaka Response Received:", abakaResponse.data);
+        return res.json(abakaResponse.data);
 
-        const data = Buffer.from(JSON.stringify(payload)).toString("base64");
-        const crypto = require("crypto");
-
-        const signString = privateKey + data + privateKey;
-        const signature = crypto.createHash("sha1").update(signString, "utf8").digest("base64");
-
-        console.log("[DEBUG] Generated Signature:", signature);
-        console.log("[DEBUG] Merchant ID:", merchantId);
-        console.log("[DEBUG] Raw Data (Base64):", data);
-        console.log("[DEBUG] Signing String:", signString);
-        console.log("[DEBUG] Generated Signature:", signature);
-
-
-        // **Instead of returning a direct link, return an HTML form**
-        const abakaUrl = `https://secure.abaka.cc/rest/v2`;
-
-        const formHtml = `
-            <html>
-            <body onload="document.forms['paymentForm'].submit()">
-                <form id="paymentForm" action="${abakaUrl}" method="POST">
-                    <input type="hidden" name="data" value="${data}" />
-                    <input type="hidden" name="signature" value="${signature}" />
-                    <noscript>
-                        <button type="submit">Click here to proceed to payment</button>
-                    </noscript>
-                </form>
-            </body>
-            </html>
-        `;
-
-        res.send(formHtml);
     } catch (error) {
-        console.error("[ERROR] Payment processing failed:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        console.error("[ERROR] Processing payment failed:", error.response?.data || error.message);
+        return res.status(500).json({ error: "Internal Server Error" });
     }
-
 });
+
+
 
 
 // ✅ Webhook for Shopify Payment Updates

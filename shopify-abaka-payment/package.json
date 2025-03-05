@@ -9,15 +9,24 @@
     "vercel-dev": "vercel dev",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["shopify", "abaka", "payments"],
+  "keywords": [
+    "shopify",
+    "abaka",
+    "payments"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "axios": "^1.6.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "express-rate-limit": "^7.5.0",
-    "axios": "^1.6.1"
+    "express-rate-limit": "^7.5.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^4.0.10"
   }
 }
